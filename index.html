@@ -59,6 +59,8 @@ a{color:var(--pri-deep)}
 .hint{font-size:12.5px;color:var(--muted);margin-top:6px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .chips{display:flex;gap:8px;flex-wrap:wrap}
+.dowtime{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:12px;font-weight:700;color:var(--muted)}
+.dowtime input{width:112px;padding:8px 10px}
 .chip{border-radius:99px;padding:7px 14px;font-size:13.5px;font-weight:600;background:var(--gray-soft);color:var(--muted);transition:.15s}
 .chip.on{background:var(--pri);color:#fff}
 .badge{display:inline-flex;align-items:center;gap:4px;border-radius:99px;padding:3px 10px;font-size:12px;font-weight:700}
@@ -331,11 +333,17 @@ a{color:var(--pri-deep)}
             <input type="time" id="setNewTime" style="border:2px solid var(--line);border-radius:12px;padding:8px 12px">
             <button class="btn btn-soft btn-sm" onclick="addDefaultTime()">시간 추가</button>
           </div>
-          <div class="two" style="margin-top:14px">
-            <div class="field"><label>점심시간 대략 시작</label><input type="time" id="setLunchTime"></div>
-            <div class="field"><label>방과 후 대략 시작</label><input type="time" id="setAfterTime"></div>
+          <div class="field" style="margin-top:14px"><label>점심시간 대략 시작</label><input type="time" id="setLunchTime" style="max-width:160px"></div>
+          <div class="field"><label>방과 후 대략 시작 (요일별)</label>
+            <div class="row" id="setAfterRow" style="gap:6px;flex-wrap:wrap">
+              <label class="dowtime"><span>월</span><input type="time" id="setAfter1"></label>
+              <label class="dowtime"><span>화</span><input type="time" id="setAfter2"></label>
+              <label class="dowtime"><span>수</span><input type="time" id="setAfter3"></label>
+              <label class="dowtime"><span>목</span><input type="time" id="setAfter4"></label>
+              <label class="dowtime"><span>금</span><input type="time" id="setAfter5"></label>
+            </div>
           </div>
-          <p class="hint" style="margin-top:-4px;margin-bottom:12px">학생 화면에 "12:40쯤"처럼 보이고, 시간 순서 정렬과 지난 시간 판단에 써요.</p>
+          <p class="hint" style="margin-top:-4px;margin-bottom:12px">학생 화면에 "15:00쯤"처럼 보이고, 시간 순서 정렬과 지난 시간 판단에 써요.</p>
           <div class="field"><label>상담 1회 길이 (분)</label><input type="number" id="setDuration" min="5" max="120" step="5"></div>
           <div class="field"><label>상담 장소</label><input id="setPlace" placeholder="예: 미술실"></div>
           <div class="field"><label>학생에게 보이는 안내문</label><textarea id="setNotice" rows="3"></textarea></div>
@@ -385,7 +393,7 @@ const NAMED_SLOTS = ['점심시간', '방과 후'];
 const DEFAULT_SETTINGS = {
   defaultTimes: ['점심시간', '방과 후'],
   lunchTime: '12:40',   // 점심시간 대략 시작 (정렬·지난 시간 판단·학생 안내용)
-  afterTime: '16:10',   // 방과 후 대략 시작
+  afterTimes: { 1: '15:00', 2: '16:00', 3: '16:00', 4: '15:00', 5: '15:00' },   // 방과 후 대략 시작 (요일별: 월목금 3시, 화수 4시)
   duration: 30,
   place: '미술실',
   notice: '상담을 원하는 날짜와 시간을 고른 뒤 신청해 주세요. 선생님이 확인하고 승인하면 이 페이지에서 알려드려요.'
@@ -435,11 +443,26 @@ function addMin(hm, min) {
 }
 const isNamed = t => NAMED_SLOTS.includes(t);
 // 슬롯의 대략 시작 시각 (이름 슬롯이면 설정값, 아니면 그 시각)
-const slotStart = t => t === '점심시간' ? (settings.lunchTime || '12:40') : t === '방과 후' ? (settings.afterTime || '16:10') : t;
-const sortSlots = arr => arr.slice().sort((a, b) => slotStart(a).localeCompare(slotStart(b)) || a.localeCompare(b));
-const reqKey = r => r.date + slotStart(r.time);
-const slotRange = t => isNamed(t) ? `${slotStart(t)}쯤 · ${settings.duration || 30}분` : `${t}~${addMin(t, settings.duration || 30)}`;
-const isPastSlot = (date, time) => date < todayStr() || (date === todayStr() && slotStart(time) <= nowHM());
+// 방과 후 시작은 요일별 (date 없으면 월요일 값)
+function afterTimeFor(date) {
+  const at = { ...DEFAULT_SETTINGS.afterTimes, ...(settings.afterTimes || {}) };
+  const dow = date ? new Date(date + 'T00:00:00').getDay() : 1;
+  return at[dow] || at[1] || '15:00';
+}
+const slotStart = (t, date) => t === '점심시간' ? (settings.lunchTime || '12:40') : t === '방과 후' ? afterTimeFor(date) : t;
+const sortSlots = (arr, date) => arr.slice().sort((a, b) => slotStart(a, date).localeCompare(slotStart(b, date)) || a.localeCompare(b));
+const reqKey = r => r.date + slotStart(r.time, r.date);
+// 설정 탭처럼 날짜가 없을 때 방과 후는 요일별 요약 ("월목금 15:00 · 화수 16:00")
+function afterTimesSummary() {
+  const at = { ...DEFAULT_SETTINGS.afterTimes, ...(settings.afterTimes || {}) };
+  const groups = {};
+  [1, 2, 3, 4, 5].forEach(d => { const t = at[d] || at[1]; (groups[t] = groups[t] || []).push(DOW[d]); });
+  return Object.keys(groups).sort().map(t => `${groups[t].join('')} ${t}`).join(' · ');
+}
+const slotRange = (t, date) => t === '방과 후' && !date ? afterTimesSummary()
+  : isNamed(t) ? `${slotStart(t, date)}쯤 · ${settings.duration || 30}분`
+  : `${t}~${addMin(t, settings.duration || 30)}`;
+const isPastSlot = (date, time) => date < todayStr() || (date === todayStr() && slotStart(time, date) <= nowHM());
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function hashPw(s) { let h = 5381; for (const c of String(s)) h = ((h << 5) + h + c.charCodeAt(0)) | 0; return 'h' + (h >>> 0).toString(36); }
 function toast(msg) {
@@ -504,7 +527,9 @@ function applySettingsToUI() {
   $('stuNotice').textContent = settings.notice;
   if (role === 'teacher') {
     $('setDuration').value = settings.duration; $('setPlace').value = settings.place; $('setNotice').value = settings.notice;
-    $('setLunchTime').value = settings.lunchTime || '12:40'; $('setAfterTime').value = settings.afterTime || '16:10';
+    $('setLunchTime').value = settings.lunchTime || '12:40';
+    const at = { ...DEFAULT_SETTINGS.afterTimes, ...(settings.afterTimes || {}) };
+    [1, 2, 3, 4, 5].forEach(d => { $('setAfter' + d).value = at[d] || at[1]; });
     renderDefaultTimes();
   }
 }
@@ -612,7 +637,7 @@ function renderStudentDay() {
   if (!selDate) { card.style.display = 'none'; return; }
   card.style.display = '';
   $('stuDayTitle').textContent = `${fmtDate(selDate)} 시간 고르기`;
-  const times = sortSlots((days[selDate] && days[selDate].times) || []);
+  const times = sortSlots((days[selDate] && days[selDate].times) || [], selDate);
   const box = $('stuSlots'); box.innerHTML = '';
   if (!times.length) box.innerHTML = '<div class="empty">이 날은 상담 시간이 없어요.</div>';
   times.forEach(t => {
@@ -620,7 +645,7 @@ function renderStudentDay() {
     const h = holds[key];
     const el = document.createElement('button');
     el.className = 'slot';
-    el.innerHTML = `${t}<small>${slotRange(t)}</small>`;
+    el.innerHTML = `${t}<small>${slotRange(t, selDate)}</small>`;
     if (h && h.sid === me.sid) { el.classList.add('mine'); el.innerHTML = `${t}<small>내가 신청함</small>`; el.disabled = true; }
     else if (h) { el.classList.add('taken'); el.innerHTML = `${t}<small>이미 신청됨</small>`; el.disabled = true; }
     else if (isPastSlot(selDate, t)) { el.classList.add('taken'); el.innerHTML = `${t}<small>지난 시간</small>`; el.disabled = true; }
@@ -675,7 +700,7 @@ function renderStudentReqs() {
     const canCancel = (r.status === 'pending' || r.status === 'approved') && !isPastSlot(r.date, r.time);
     return `<div class="req ${isNew ? 'hot' : ''}">
       <div class="top"><span class="when">${fmtDate(r.date)} ${r.time}</span><span class="badge b-${r.status}">${STATUS_LABEL[r.status]}</span>${isNew ? '<span class="badge b-new">NEW</span>' : ''}<span class="time-ago">${timeAgo(r.createdAt)}</span></div>
-      <div class="who">${esc(r.category)} · ${slotRange(r.time)}${r.status === 'approved' ? ' · ' + esc(settings.place) : ''}</div>
+      <div class="who">${esc(r.category)} · ${slotRange(r.time, r.date)}${r.status === 'approved' ? ' · ' + esc(settings.place) : ''}</div>
       <div class="body">${esc(r.topic)}</div>
       ${r.reply ? `<div class="reply">💬 선생님: ${esc(r.reply)}</div>` : ''}
       <div class="acts">
@@ -746,13 +771,13 @@ function renderTeacherCal() {
 function renderTeacherDay() {
   if (!selDate) { $('tDayTitle').textContent = '날짜를 눌러 주세요'; $('tDayBody').innerHTML = '<div class="empty">달력에서 날짜를 누르면 그 날의 상담 시간을 열고 닫을 수 있어요.</div>'; return; }
   $('tDayTitle').textContent = fmtDate(selDate, true);
-  const times = sortSlots((days[selDate] && days[selDate].times) || []);
-  const rs = requests.filter(r => r.date === selDate && r.status !== 'cancelled' && r.status !== 'rejected').sort((a, b) => slotStart(a.time).localeCompare(slotStart(b.time)));
+  const times = sortSlots((days[selDate] && days[selDate].times) || [], selDate);
+  const rs = requests.filter(r => r.date === selDate && r.status !== 'cancelled' && r.status !== 'rejected').sort((a, b) => slotStart(a.time, selDate).localeCompare(slotStart(b.time, selDate)));
   let html = `<div class="field"><label>상담 가능 시간 ${times.length ? `(${times.length}개)` : ''}</label><div class="slots" id="tDaySlots">`;
   if (!times.length) html += `<div class="hint">이 날은 아직 닫혀 있어요.</div>`;
   times.forEach(t => {
     const r = activeReqAt(selDate, t);
-    html += `<div class="slot edit ${r ? 'busy' : ''}"><span>${t}</span>${r ? `<small>${esc(r.name)}</small>` : ''}<button class="x" title="시간 빼기" onclick="removeTime('${t}')">×</button></div>`;
+    html += `<div class="slot edit ${r ? 'busy' : ''}"><span>${t}</span>${isNamed(t) ? `<small>${slotStart(t, selDate)}쯤</small>` : ''}${r ? `<small>${esc(r.name)}</small>` : ''}<button class="x" title="시간 빼기" onclick="removeTime('${t}')">×</button></div>`;
   });
   html += `</div></div>
     <div class="row" style="margin-bottom:8px">
@@ -772,7 +797,7 @@ function renderTeacherDay() {
 }
 async function saveDay(date, times) {
   const ref = db.collection(COL.days).doc(date);
-  if (!times.length) await ref.delete(); else await ref.set({ times: sortSlots([...new Set(times)]), updatedAt: FV.serverTimestamp() });
+  if (!times.length) await ref.delete(); else await ref.set({ times: sortSlots([...new Set(times)], date), updatedAt: FV.serverTimestamp() });
 }
 async function addTime(named) {
   const t = named || $('tNewTime').value; if (!t) return toast('시간을 골라 주세요');
@@ -806,7 +831,7 @@ async function bulkApply() {
     if (date < todayStr()) continue;
     if (!dows.includes(new Date(view.y, view.m, d).getDay())) continue;
     if (days[date] && days[date].times && days[date].times.length) continue;
-    b.set(db.collection(COL.days).doc(date), { times: sortSlots(settings.defaultTimes), updatedAt: FV.serverTimestamp() }); n++;
+    b.set(db.collection(COL.days).doc(date), { times: sortSlots(settings.defaultTimes, date), updatedAt: FV.serverTimestamp() }); n++;
   }
   if (!n) return toast('새로 열 날이 없어요');
   await b.commit(); toast(`${n}일을 열었어요`);
@@ -885,8 +910,10 @@ async function removeDefaultTime(t) {
 }
 async function saveSettings() {
   const duration = +$('setDuration').value || 30, place = $('setPlace').value.trim() || '미술실', notice = $('setNotice').value.trim();
-  const lunchTime = $('setLunchTime').value || '12:40', afterTime = $('setAfterTime').value || '16:10';
-  await db.collection(COL.settings).doc('main').set({ duration, place, notice, lunchTime, afterTime }, { merge: true });
+  const lunchTime = $('setLunchTime').value || '12:40';
+  const afterTimes = {};
+  [1, 2, 3, 4, 5].forEach(d => { afterTimes[d] = $('setAfter' + d).value || DEFAULT_SETTINGS.afterTimes[d]; });
+  await db.collection(COL.settings).doc('main').set({ duration, place, notice, lunchTime, afterTimes }, { merge: true });
   toast('저장했어요');
 }
 function copyLink() { navigator.clipboard.writeText($('setLink').value).then(() => toast('링크를 복사했어요')); }
